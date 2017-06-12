@@ -19,13 +19,14 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.diff.RawTextComparator;
-import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
@@ -47,13 +48,19 @@ public class Main {
 	private static Logger log;
 	private static int lookback = 20;
 	
-	public static void main(String[] args) throws Exception {
-		System.setProperty(org.slf4j.impl.SimpleLogger.DEFAULT_LOG_LEVEL_KEY, "DEBUG");
-		
+	public static void main(String[] args) throws Exception {		
 		Logger logMain = log = LoggerFactory.getLogger("main");
 		
-		try (InputStream is = new FileInputStream("config.properties")) {
-			config.load(is);
+		{
+			File configFile = new File("config.properties"); 
+			if (configFile.exists()) {
+				try (InputStream is = new FileInputStream("config.properties")) {
+					config.load(is);
+				}
+			} else {
+				log.error("cannot load config from because it doesn't exist: " + configFile.getAbsolutePath());
+				System.exit(1);
+			}
 		}
 		
 		log.debug("config loaded");
@@ -73,14 +80,17 @@ public class Main {
 		DAVRepositoryFactory.setup();
 		
 		for (String project : config.getProperty("projects").split("\\s*,\\s*")) {
-			log = LoggerFactory.getLogger(project);
-			handleProject(
-					config.getProperty("project." + project + ".svnPath"),
-					config.getProperty("project." + project + ".oldPathPrefix"),
-					config.getProperty("project." + project + ".gitURL"),
-					config.getProperty("project." + project + ".gitPath"),
-					config.getProperty("project." + project + ".filter")
-			);
+			for (String branch: config.getProperty("project." + project + ".svnBranches").split(",")) {
+				log = LoggerFactory.getLogger(project + "[" + branch + "]");
+				handleProject(
+						config.getProperty("project." + project + ".svnProject"),
+						config.getProperty("project." + project + ".svnPath"),
+						branch,
+						config.getProperty("project." + project + ".gitProject"),
+						config.getProperty("project." + project + ".gitPath"),
+						config.getProperty("project." + project + ".filter")
+				);
+			}
 			log = logMain;
 		}
 		
@@ -88,16 +98,19 @@ public class Main {
 	}
 	
 	@SuppressWarnings("unchecked")
-	private static void handleProject(String svnPath, String oldPathPrefix, String gitURL, String gitPath, String filter) throws Exception {
+	private static void handleProject(String svnProject, String svnPath, String branch, String gitProject, String gitPath, String filter) throws Exception {
+		String svnBranch = branch.equals("trunk") ? branch : ("branches/" + branch);
+		String svnURL = config.getProperty("svnRoot") + "/" + svnProject + "/" + svnBranch + "/" + svnPath;
 		
-		String svnURL = config.getProperty("svnRoot") + svnPath + "/" + oldPathPrefix + "/" + gitPath;
-		File gitRoot = new File(gitURL).getParentFile();
+		File gitRoot = new File(gitProject);
 		
-		FileRepositoryBuilder builder = new FileRepositoryBuilder();
-		Repository repository = builder.setGitDir(new File(gitURL)).readEnvironment().findGitDir().build();
-		git = new Git(repository);
+		git = new Git(new FileRepositoryBuilder().setGitDir(new File(gitRoot, ".git")).readEnvironment().findGitDir().build());
+//		git.clean().setForce(true).call();
+		log.info("doing git checkout …");
+		git.checkout().setName(branch.equals("trunk") ? "master" : branch).call();
+		log.info("git checkout done");
 		
-		log.debug("gitURL: " + gitURL);
+		log.debug("gitProject: " + gitProject);
 		log.debug("svnURL: " + svnURL);
 		
 		svn = SVNRepositoryFactory.create(SVNURL.parseURIEncoded(svnURL));
@@ -106,7 +119,7 @@ public class Main {
 		log.info("SVN revision: " + svninfo.getRevision());
 		
 		List<RevCommit> gitLogs = new ArrayList<>(lookback);
-		git.log().addPath(gitPath).addPath(oldPathPrefix + "/" + gitPath).setMaxCount(50).call().forEach( r -> {
+		git.log().addPath(gitPath).addPath(svnPath).setMaxCount(50).call().forEach( r -> {
 			gitLogs.add(r);
 		});
 		ListIterator<SVNLogEntry> svnEntries = new LinkedList<SVNLogEntry>().listIterator();
@@ -124,7 +137,7 @@ public class Main {
 				svnEntries.add(entry);
 				log.debug("rev : " + entry.getRevision());
 				for (RevCommit gitLog : gitLogs) {
-					if (checkLogEntry(gitLog, entry, gitPath, pFilter)) {
+					if (checkLogEntry(gitLog, entry, svnPath, gitPath, pFilter)) {
 						logEntry = entry;
 						svnEntries.previous();
 						break;
@@ -140,11 +153,11 @@ public class Main {
 		log.info("found: " + logEntry.getRevision());
 		
 		while (svnEntries.hasPrevious()) {
-			handleLogEntry(svnEntries.previous(), gitPath, svnPath, gitRoot, pFilter);
+			handleLogEntry(svnEntries.previous(), svnPath, "/" + svnProject + "/" + svnBranch, gitRoot, gitPath, pFilter);
 		};
 	}
 	
-	private static boolean checkLogEntry(RevCommit gitLog, SVNLogEntry entry, String gitPath, Pattern pFilter) throws Exception {
+	private static boolean checkLogEntry(RevCommit gitLog, SVNLogEntry entry, String svnPath, String gitPath, Pattern pFilter) throws Exception {
 		if (gitLog.getFullMessage().contains(entry.getMessage())) {
 			log.trace("same message for " + entry.getRevision());
 			if (gitLog.getAuthorIdent().getName().equals(authors.get(entry.getAuthor()).getKey())) {
@@ -157,20 +170,17 @@ public class Main {
 
 					df.scan(gitLog.getParent(0).getTree(), gitLog.getTree()).forEach(d -> {
 						String path = d.getNewPath();
-						path = path.substring(path.indexOf(gitPath));
-						if (pFilter.matcher(path).find()) {
-							gitSet.add(path);
+						String prePath = path.startsWith(gitPath) ? gitPath : path.startsWith(svnPath) ? svnPath : null;
+						if (prePath != null && pFilter.matcher(path).find()) {
+							gitSet.add(path.substring(prePath.length()));
 						}
 					});
 				}
 				Set<String> svnSet = new HashSet<>();
 				entry.getChangedPaths().keySet().forEach(path -> {
-					int i = path.indexOf(gitPath);
-					if (i != -1) {
-						path = path.substring(i);
-						if (pFilter.matcher(path).find()) {
-							svnSet.add(path);
-						}
+					int i = path.indexOf(svnPath);
+					if (i != -1 && pFilter.matcher(path).find()) {
+						svnSet.add(path.substring(i + svnPath.length()));
 					}
 				});
 				
@@ -182,7 +192,7 @@ public class Main {
 		return false;
 	}
 	
-	private static void handleLogEntry(SVNLogEntry logEntry, String gitPath, String svnPath, File gitRoot, Pattern pFilter) throws Exception {
+	private static void handleLogEntry(SVNLogEntry logEntry, String svnPath, String svnPrefix, File gitRoot, String gitPath, Pattern pFilter) throws Exception {
 		log.info("previous: " + logEntry.getRevision());
 		Entry<String, String> author = authors.get(logEntry.getAuthor());
 		if (author == null) {
@@ -193,9 +203,11 @@ public class Main {
 		for (SVNLogEntryPath entry : logEntry.getChangedPaths().values()) {
 			String path = entry.getPath();
 			log.debug(entry.getType() + " " + path);
-			if (path.startsWith(svnPath) && path.contains(gitPath) && pFilter.matcher(path).find()) {
+			if (path.startsWith(svnPrefix) && path.contains(svnPath) && pFilter.matcher(path).find()) {
 				log.info("handle: " + path);
-				String subPath = path.substring(path.indexOf(gitPath));
+				path = path.substring(svnPrefix.length() + 1);
+				String prePath = new File(gitRoot, gitPath).exists() ? gitPath : new File(gitRoot, svnPath).exists() ? svnPath : null;
+				String subPath = prePath + path.substring(path.indexOf(svnPath) + svnPath.length());
 				File dest = new File(gitRoot, subPath);
 				switch (entry.getType()) {
 				case SVNLogEntryPath.TYPE_DELETED:
@@ -211,9 +223,10 @@ public class Main {
 			}
 		}
 		if (commitNeed) {
+			PersonIdent pi = new PersonIdent(author.getKey(), author.getValue(), logEntry.getDate(), TimeZone.getDefault());
 			git.commit()
-				.setAuthor(author.getKey(), author.getValue())
-				.setCommitter(author.getKey(), author.getValue())
+				.setAuthor(pi)
+				.setCommitter(pi)
 				.setMessage(logEntry.getMessage())
 				.call();
 		}
