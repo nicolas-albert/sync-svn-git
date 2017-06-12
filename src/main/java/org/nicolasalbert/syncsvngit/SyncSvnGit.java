@@ -106,7 +106,7 @@ public class SyncSvnGit {
 		
 		git = new Git(new FileRepositoryBuilder().setGitDir(new File(gitRoot, ".git")).readEnvironment().findGitDir().build());
 //		git.clean().setForce(true).call();
-		log.info("doing git checkout …");
+		log.info("doing git checkout ...");
 		git.checkout().setName(branch.equals("trunk") ? "master" : branch).call();
 		log.info("git checkout done");
 		
