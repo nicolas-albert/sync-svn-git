@@ -1,4 +1,9 @@
 # sync-svn-git
+
+[![Build Status](https://travis-ci.org/nicolas-albert/sync-svn-git.svg?branch=master)](https://travis-ci.org/nicolas-albert/sync-svn-git)
+
+## What is __sync-svn-git__ ?
+
 Application tool to keep up-to-date sources from SVN to many GIT repositories after a source migration.
 
 To work, this project need a __config.properties__ in its working directory (root of the project if launched from Eclipse).
