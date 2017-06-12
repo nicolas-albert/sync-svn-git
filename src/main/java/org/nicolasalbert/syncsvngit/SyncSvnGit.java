@@ -40,7 +40,7 @@ import org.tmatesoft.svn.core.internal.io.dav.DAVRepositoryFactory;
 import org.tmatesoft.svn.core.io.SVNRepository;
 import org.tmatesoft.svn.core.io.SVNRepositoryFactory;
 
-public class Main {
+public class SyncSvnGit {
 	private static SVNRepository svn;
 	private static Git git;
 	private static Map<String, Entry<String, String>> authors = new HashMap<>();
