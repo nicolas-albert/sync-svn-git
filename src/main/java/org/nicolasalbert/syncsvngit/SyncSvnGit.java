@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import org.tmatesoft.svn.core.SVNDirEntry;
 import org.tmatesoft.svn.core.SVNLogEntry;
 import org.tmatesoft.svn.core.SVNLogEntryPath;
+import org.tmatesoft.svn.core.SVNNodeKind;
 import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.internal.io.dav.DAVRepositoryFactory;
 import org.tmatesoft.svn.core.io.SVNRepository;
@@ -81,7 +82,7 @@ public class SyncSvnGit {
 		
 		for (String project : config.getProperty("projects").split("\\s*,\\s*")) {
 			for (String branch: config.getProperty("project." + project + ".svnBranches").split(",")) {
-				log = LoggerFactory.getLogger(project + "[" + branch + "]");
+				log = LoggerFactory.getLogger(project + "[" + branch.replace('.', '-') + "]");
 				handleProject(
 						config.getProperty("project." + project + ".svnProject"),
 						config.getProperty("project." + project + ".svnPath"),
@@ -214,9 +215,16 @@ public class SyncSvnGit {
 					dest.delete();
 					break;
 				default:
-					try (FileOutputStream fos = new FileOutputStream(dest)) {
-						svn.getFile(entry.getPath(), logEntry.getRevision(), null, fos);
-					};
+					SVNNodeKind kind = entry.getKind(); 
+					if (kind.equals(SVNNodeKind.DIR)) {
+						dest.mkdirs();
+					} else if (kind.equals(SVNNodeKind.FILE)) {
+						try (FileOutputStream fos = new FileOutputStream(dest)) {
+							svn.getFile(entry.getPath(), logEntry.getRevision(), null, fos);
+						};
+					} else {
+						log.warn("cannot handle node of kind: " + kind + " for: " + dest);
+					}
 				}
 				git.add().addFilepattern(subPath).call();
 				commitNeed = true;
