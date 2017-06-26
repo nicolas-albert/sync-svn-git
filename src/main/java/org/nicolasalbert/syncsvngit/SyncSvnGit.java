@@ -219,6 +219,7 @@ public class SyncSvnGit {
 					if (kind.equals(SVNNodeKind.DIR)) {
 						dest.mkdirs();
 					} else if (kind.equals(SVNNodeKind.FILE)) {
+						dest.getParentFile().mkdirs();
 						try (FileOutputStream fos = new FileOutputStream(dest)) {
 							svn.getFile(entry.getPath(), logEntry.getRevision(), null, fos);
 						};
