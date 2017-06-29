@@ -13,3 +13,18 @@ dependencies {
 	compile 'org.eclipse.jgit:org.eclipse.jgit:[4.7,4.8['
 }
 
+jar {
+	from ({
+		(configurations.runtime).collect {
+			it.isDirectory() ? it : zipTree(it)
+		}
+	}) {
+        // remove all signature files
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+    }
+	manifest {
+		attributes("Main-Class": "org.nicolasalbert.syncsvngit.SyncSvnGit" )
+	}
+}

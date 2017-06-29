@@ -205,14 +205,14 @@ public class SyncSvnGit {
 			String path = entry.getPath();
 			log.debug(entry.getType() + " " + path);
 			if (path.startsWith(svnPrefix) && path.contains(svnPath) && pFilter.matcher(path).find()) {
-				log.info("handle: " + path);
+				log.info("handle: " + entry.getType() + " " + path);
 				path = path.substring(svnPrefix.length() + 1);
 				String prePath = new File(gitRoot, gitPath).exists() ? gitPath : new File(gitRoot, svnPath).exists() ? svnPath : null;
 				String subPath = prePath + path.substring(path.indexOf(svnPath) + svnPath.length());
 				File dest = new File(gitRoot, subPath);
 				switch (entry.getType()) {
 				case SVNLogEntryPath.TYPE_DELETED:
-					dest.delete();
+					git.rm().addFilepattern(subPath).call();
 					break;
 				default:
 					SVNNodeKind kind = entry.getKind(); 
@@ -226,8 +226,8 @@ public class SyncSvnGit {
 					} else {
 						log.warn("cannot handle node of kind: " + kind + " for: " + dest);
 					}
+					git.add().addFilepattern(subPath).call();
 				}
-				git.add().addFilepattern(subPath).call();
 				commitNeed = true;
 			}
 		}
