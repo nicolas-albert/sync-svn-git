@@ -81,14 +81,17 @@ public class SyncSvnGit {
 		DAVRepositoryFactory.setup();
 		
 		for (String project : config.getProperty("projects").split("\\s*,\\s*")) {
-			for (String branch: config.getProperty("project." + project + ".svnBranches").split(",")) {
-				log = LoggerFactory.getLogger(project + "[" + branch.replace('.', '-') + "]");
+			String[] gitBranches = config.getProperty("project." + project + ".gitBranches").split(",");
+			int i = 0;
+			for (String svnBranch: config.getProperty("project." + project + ".svnBranches").split(",")) {
+				log = LoggerFactory.getLogger(project + "[" + svnBranch.replace('.', '-') + "]");
 				handleProject(
 						config.getProperty("project." + project + ".svnProject"),
 						config.getProperty("project." + project + ".svnPath"),
-						branch,
+						svnBranch,
 						config.getProperty("project." + project + ".gitProject"),
 						config.getProperty("project." + project + ".gitPath"),
+						gitBranches[i++],
 						config.getProperty("project." + project + ".filter")
 				);
 			}
@@ -99,8 +102,8 @@ public class SyncSvnGit {
 	}
 	
 	@SuppressWarnings("unchecked")
-	private static void handleProject(String svnProject, String svnPath, String branch, String gitProject, String gitPath, String filter) throws Exception {
-		String svnBranch = branch.equals("trunk") ? branch : ("branches/" + branch);
+	private static void handleProject(String svnProject, String svnPath, String svnBranch, String gitProject, String gitPath, String gitBranch, String filter) throws Exception {
+		svnBranch = svnBranch.equals("trunk") ? svnBranch : ("branches/" + svnBranch);
 		String svnURL = config.getProperty("svnRoot") + "/" + svnProject + "/" + svnBranch + "/" + svnPath;
 		
 		File gitRoot = new File(gitProject);
@@ -108,7 +111,7 @@ public class SyncSvnGit {
 		git = new Git(new FileRepositoryBuilder().setGitDir(new File(gitRoot, ".git")).readEnvironment().findGitDir().build());
 //		git.clean().setForce(true).call();
 		log.info("doing git checkout ...");
-		git.checkout().setName(branch.equals("trunk") ? "master" : branch).call();
+		git.checkout().setName(gitBranch).call();
 		log.info("git checkout done");
 		
 		log.debug("gitProject: " + gitProject);
