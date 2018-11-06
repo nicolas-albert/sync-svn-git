@@ -3,7 +3,9 @@ package org.nicolasalbert.syncsvngit;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.AbstractMap.SimpleImmutableEntry;
@@ -33,6 +35,7 @@ import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.tmatesoft.svn.core.SVNDirEntry;
+import org.tmatesoft.svn.core.SVNException;
 import org.tmatesoft.svn.core.SVNLogEntry;
 import org.tmatesoft.svn.core.SVNLogEntryPath;
 import org.tmatesoft.svn.core.SVNNodeKind;
@@ -48,8 +51,11 @@ public class SyncSvnGit {
 	private static Properties config = new Properties();
 	private static Logger log;
 	private static int lookback = 20;
+	private static boolean checkAll = true;
 	
-	public static void main(String[] args) throws Exception {		
+	public static void main(String[] args) throws Exception {
+		System.setProperty("org.slf4j.simpleLogger.defaultLogLevel","DEBUG");
+		
 		Logger logMain = log = LoggerFactory.getLogger("main");
 		
 		{
@@ -101,6 +107,28 @@ public class SyncSvnGit {
 		log.info("bye !");
 	}
 	
+	private static void checkAll(File gitPath, Pattern pFilter, String svnPath, String relativePath) throws SVNException, FileNotFoundException, IOException {
+		Collection<SVNDirEntry> entries = svn.getDir(svnPath + relativePath, -1, null, SVNDirEntry.DIRENT_ALL, (Collection<SVNDirEntry>) null);
+		for (SVNDirEntry entry: entries) {
+			String path = relativePath + "/" + entry.getRelativePath();
+			if (entry.getKind() == SVNNodeKind.DIR) {
+				log.debug("checkAll dir: " + path);
+				checkAll(gitPath, pFilter, svnPath, path);
+			} else if (entry.getKind() == SVNNodeKind.FILE && pFilter.matcher(svnPath + path).find()) {
+				File dest = new File(gitPath, path);
+				if (!dest.exists()) {
+					log.debug("checkAll file: " + dest.exists() + " " + path);
+				} else {
+					log.debug("checkAll file: " + dest.exists() + " " + path);
+				}
+				dest.getParentFile().mkdirs();
+				try (FileOutputStream fos = new FileOutputStream(dest)) {
+					svn.getFile(svnPath + path, -1, null, fos);
+				};
+			}
+		}
+	}
+	
 	@SuppressWarnings("unchecked")
 	private static void handleProject(String svnProject, String svnPath, String svnBranch, String gitProject, String gitPath, String gitBranch, String filter) throws Exception {
 		svnBranch = svnBranch.equals("trunk") ? svnBranch : ("branches/" + svnBranch);
@@ -122,12 +150,18 @@ public class SyncSvnGit {
 		
 		log.info("SVN revision: " + svninfo.getRevision());
 		
+		Pattern pFilter = Pattern.compile(filter);
+		
+		if (checkAll) {
+			checkAll(new File(gitRoot, gitPath), pFilter, "/" + svnProject + "/" + svnBranch + "/" + svnPath, "");
+			return;
+		}
+		
 		List<RevCommit> gitLogs = new ArrayList<>(lookback);
-		git.log().addPath(gitPath).addPath(svnPath).setMaxCount(50).call().forEach( r -> {
+		git.log().addPath(gitPath).addPath(svnPath).setMaxCount(50).call().forEach(r -> {
 			gitLogs.add(r);
 		});
 		ListIterator<SVNLogEntry> svnEntries = new LinkedList<SVNLogEntry>().listIterator();
-		Pattern pFilter = Pattern.compile(filter);
 		
 		SVNLogEntry logEntry = null;
 		long curRev = svninfo.getRevision();
